@@ -3,7 +3,7 @@
 # ═══════════════════════════════════════════════════════════
 # XRAYEBATOR UPDATE SCRIPT v1.3.1 FINAL
 # Обновление Xrayebator до последней версии
-# GitHub: https://github.com/howdeploy/Xrayebator
+# GitHub: https://github.com/d-rol/Xrayebator
 # ═══════════════════════════════════════════════════════════
 
 # Цвета
@@ -16,8 +16,49 @@ MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # GitHub репозиторий
-GITHUB_USER="howdeploy"
+GITHUB_USER="d-rol"
 GITHUB_REPO="Xrayebator"
+RUNTIME_DIR="/run/xrayebator"
+UPDATE_SESSION_FILE="${RUNTIME_DIR}/update_session"
+UPDATE_SESSION_WARNED_FILE="${UPDATE_SESSION_FILE}.warned"
+TMP_UPDATE_SCRIPT=""
+TMP_XRAYEBATOR_BIN=""
+
+ensure_runtime_dir() {
+  mkdir -p "$RUNTIME_DIR"
+  chmod 700 "$RUNTIME_DIR"
+}
+
+make_runtime_temp() {
+  local prefix=$1
+  ensure_runtime_dir
+  mktemp "${RUNTIME_DIR}/${prefix}.XXXXXX"
+}
+
+cleanup_update_tmp() {
+  [[ -n "$TMP_UPDATE_SCRIPT" ]] && rm -f "$TMP_UPDATE_SCRIPT"
+  [[ -n "$TMP_XRAYEBATOR_BIN" ]] && rm -f "$TMP_XRAYEBATOR_BIN"
+}
+
+download_file() {
+  local url=$1
+  local dst=$2
+  curl --proto '=https' --tlsv1.2 --fail --show-error --silent --location "$url" -o "$dst"
+}
+
+download_bash_script() {
+  local url=$1
+  local dst=$2
+
+  if ! download_file "$url" "$dst"; then
+    return 1
+  fi
+
+  [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
+}
+
+trap cleanup_update_tmp EXIT
+ensure_runtime_dir
 
 # Проверка прав root
 if [[ $EUID -ne 0 ]]; then
@@ -28,13 +69,12 @@ fi
 # ═══════════════════════════════════════════════════════════
 # ОБРАБОТКА АРГУМЕНТОВ И ВОССТАНОВЛЕНИЕ СЕССИИ
 # ═══════════════════════════════════════════════════════════
-UPDATE_SESSION_FILE="/tmp/.xrayebator_update_session"
 
 # Удаляем старые файлы сессии (старше 5 минут)
 if [[ -f "$UPDATE_SESSION_FILE" ]]; then
   file_age=$(($(date +%s) - $(stat -c %Y "$UPDATE_SESSION_FILE" 2>/dev/null || echo 0)))
   if [[ $file_age -gt 300 ]]; then
-    rm -f "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_FILE.warned"
+    rm -f "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_WARNED_FILE"
   fi
 fi
 
@@ -128,7 +168,7 @@ else
   esac
 
   # СОХРАНЯЕМ выбранную ветку В ФАЙЛ СЕССИИ СРАЗУ!
-  echo "$GITHUB_BRANCH" > "$UPDATE_SESSION_FILE"
+  printf "%s" "$GITHUB_BRANCH" > "$UPDATE_SESSION_FILE"
 fi
 
 # Устанавливаем VERSION_NAME и VERSION_COLOR если они не установлены
@@ -156,7 +196,7 @@ echo -e "${BLUE}Обновление до версии: ${VERSION_COLOR}${VERSIO
 echo -e "${BLUE}Ветка GitHub: ${VERSION_COLOR}${GITHUB_BRANCH}${NC}\n"
 
 # Предупреждение для experimental/dev (показываем один раз)
-if [[ "$GITHUB_BRANCH" != "main" ]] && [[ ! -f "$UPDATE_SESSION_FILE.warned" ]]; then
+if [[ "$GITHUB_BRANCH" != "main" ]] && [[ ! -f "$UPDATE_SESSION_WARNED_FILE" ]]; then
   echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
   echo -e "${YELLOW}║                    ⚠ ВНИМАНИЕ ⚠                          ║${NC}"
   echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
@@ -181,7 +221,7 @@ if [[ "$GITHUB_BRANCH" != "main" ]] && [[ ! -f "$UPDATE_SESSION_FILE.warned" ]];
   fi
 
   # Отмечаем что предупреждение показано
-  touch "$UPDATE_SESSION_FILE.warned"
+  touch "$UPDATE_SESSION_WARNED_FILE"
   echo ""
 fi
 
@@ -204,18 +244,20 @@ echo "$GITHUB_BRANCH" > /usr/local/etc/xray/.current_branch 2>/dev/null
 # ОБНОВЛЕНИЕ СКРИПТА update.sh
 # ═══════════════════════════════════════════════════════════
 echo -e "${YELLOW}Проверка обновлений update.sh...${NC}"
-curl -fsSL "${RAW_BASE_URL}/update.sh" -o /tmp/update_new.sh
+TMP_UPDATE_SCRIPT=$(make_runtime_temp "update_new")
 
-if [[ $? -eq 0 ]] && [[ -s /tmp/update_new.sh ]]; then
-  chmod +x /tmp/update_new.sh
+if download_bash_script "${RAW_BASE_URL}/update.sh" "$TMP_UPDATE_SCRIPT"; then
+  chmod 700 "$TMP_UPDATE_SCRIPT"
 
   # Проверяем что скрипт валидный
-  if head -n 1 /tmp/update_new.sh | grep -q "^#!/bin/bash"; then
+  if head -n 1 "$TMP_UPDATE_SCRIPT" | grep -q "^#!/bin/bash"; then
     mkdir -p /usr/local/etc/xray/scripts
 
     # Сравниваем с текущей версией
-    if ! cmp -s /tmp/update_new.sh /usr/local/etc/xray/scripts/update.sh 2>/dev/null; then
-      mv /tmp/update_new.sh /usr/local/etc/xray/scripts/update.sh
+    if ! cmp -s "$TMP_UPDATE_SCRIPT" /usr/local/etc/xray/scripts/update.sh 2>/dev/null; then
+      install -m 0755 "$TMP_UPDATE_SCRIPT" /usr/local/etc/xray/scripts/update.sh
+      rm -f "$TMP_UPDATE_SCRIPT"
+      TMP_UPDATE_SCRIPT=""
       echo -e "${GREEN}✓ Скрипт update.sh обновлён${NC}"
       echo -e "${YELLOW}⚠ Перезапуск для применения изменений${NC}"
       sleep 2
@@ -225,11 +267,13 @@ if [[ $? -eq 0 ]] && [[ -s /tmp/update_new.sh ]]; then
       exit 0
     else
       echo -e "${GREEN}✓ update.sh актуален${NC}"
-      rm /tmp/update_new.sh
+      rm -f "$TMP_UPDATE_SCRIPT"
+      TMP_UPDATE_SCRIPT=""
     fi
   else
     echo -e "${YELLOW}⚠ Скачанный скрипт некорректен${NC}"
-    rm /tmp/update_new.sh
+    rm -f "$TMP_UPDATE_SCRIPT"
+    TMP_UPDATE_SCRIPT=""
   fi
 else
   echo -e "${YELLOW}⚠ Не удалось обновить update.sh${NC}"
@@ -242,16 +286,17 @@ echo ""
 
 # Обновление xrayebator
 echo -e "${YELLOW}Обновление xrayebator...${NC}"
-curl -fsSL "${RAW_BASE_URL}/xrayebator" -o /tmp/xrayebator_new
+TMP_XRAYEBATOR_BIN=$(make_runtime_temp "xrayebator_new")
 
-if [[ $? -eq 0 ]] && [[ -s /tmp/xrayebator_new ]]; then
-  chmod +x /tmp/xrayebator_new
-  mv /tmp/xrayebator_new /usr/local/bin/xrayebator
+if download_bash_script "${RAW_BASE_URL}/xrayebator" "$TMP_XRAYEBATOR_BIN"; then
+  install -m 0755 "$TMP_XRAYEBATOR_BIN" /usr/local/bin/xrayebator
+  rm -f "$TMP_XRAYEBATOR_BIN"
+  TMP_XRAYEBATOR_BIN=""
   echo -e "${GREEN}✓ xrayebator обновлён${NC}\n"
 else
   echo -e "${RED}✗ Ошибка загрузки xrayebator${NC}"
   echo -e "${YELLOW}Проверьте доступность ветки '${GITHUB_BRANCH}' на GitHub${NC}"
-  rm -f "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_FILE.warned"
+  rm -f "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_WARNED_FILE"
   exit 1
 fi
 
@@ -393,7 +438,7 @@ if systemctl is-active --quiet xray; then
 fi
 
 # Очистка временных файлов
-rm -f "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_FILE.warned"
+rm -f "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_WARNED_FILE"
 
 # ═══════════════════════════════════════════════════════════
 # ФИНАЛЬНОЕ СООБЩЕНИЕ

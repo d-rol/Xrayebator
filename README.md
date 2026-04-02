@@ -54,13 +54,15 @@
 > **Установка:**
 >
 > ```
-> wget -qO- https://raw.githubusercontent.com/howdeploy/Xrayebator/main/install.sh | sudo bash
+> curl -fsSLo install.sh https://raw.githubusercontent.com/d-rol/Xrayebator/main/install.sh
+> sudo bash install.sh
 > ```
 >
 > или
 >
 > ```
-> curl -fsSL https://raw.githubusercontent.com/howdeploy/Xrayebator/main/install.sh | sudo bash
+> wget -O install.sh https://raw.githubusercontent.com/d-rol/Xrayebator/main/install.sh
+> sudo bash install.sh
 > ```
 
 > [!IMPORTANT]

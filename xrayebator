@@ -24,6 +24,7 @@ PRIVATE_KEY_FILE="/usr/local/etc/xray/.private_key"
 PUBLIC_KEY_FILE="/usr/local/etc/xray/.public_key"
 SNI_LIST="$DATA_DIR/sni_list.txt"
 ASCII_ART="$DATA_DIR/ascii_art.txt"
+RUNTIME_DIR="/run/xrayebator"
 
 # Проверка прав root
 if [[ $EUID -ne 0 ]]; then
@@ -54,6 +55,34 @@ get_server_ip() {
     ip=$(hostname -I | awk '{print $1}')
   fi
   echo "$ip"
+}
+
+ensure_runtime_dir() {
+  mkdir -p "$RUNTIME_DIR"
+  chmod 700 "$RUNTIME_DIR"
+}
+
+make_runtime_temp() {
+  local prefix=$1
+  ensure_runtime_dir
+  mktemp "${RUNTIME_DIR}/${prefix}.XXXXXX"
+}
+
+download_file() {
+  local url=$1
+  local dst=$2
+  curl --proto '=https' --tlsv1.2 --fail --show-error --silent --location "$url" -o "$dst"
+}
+
+download_bash_script() {
+  local url=$1
+  local dst=$2
+
+  if ! download_file "$url" "$dst"; then
+    return 1
+  fi
+
+  [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -1986,7 +2015,9 @@ RESOLVEDEOF
 
   # Шаг 3: Скачивание установщика
   echo -e "${CYAN}Шаг 3/7: Скачивание AdGuard Home...${NC}"
-  if ! curl -fsSL https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh -o /tmp/agh_install.sh; then
+  local agh_installer
+  agh_installer=$(make_runtime_temp "agh_install")
+  if ! download_bash_script "https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh" "$agh_installer"; then
     echo -e "${RED}✗ Ошибка скачивания установщика${NC}"
     echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
     read
@@ -1996,14 +2027,14 @@ RESOLVEDEOF
 
   # Шаг 4: Запуск установщика
   echo -e "${CYAN}Шаг 4/7: Установка...${NC}"
-  if ! sh /tmp/agh_install.sh -v; then
+  if ! sh "$agh_installer" -v; then
     echo -e "${RED}✗ Ошибка установки AdGuard Home${NC}"
-    rm -f /tmp/agh_install.sh
+    rm -f "$agh_installer"
     echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
     read
     return
   fi
-  rm -f /tmp/agh_install.sh
+  rm -f "$agh_installer"
   echo -e "${GREEN}  ✓ AdGuard Home установлен${NC}"
 
   # Шаг 5: Конфигурация

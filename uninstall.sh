@@ -7,6 +7,30 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
+TMP_XRAY_INSTALLER=""
+
+cleanup_uninstall_tmp() {
+  [[ -n "$TMP_XRAY_INSTALLER" ]] && rm -f "$TMP_XRAY_INSTALLER"
+}
+
+download_file() {
+  local url=$1
+  local dst=$2
+  curl --proto '=https' --tlsv1.2 --fail --show-error --silent --location "$url" -o "$dst"
+}
+
+download_bash_script() {
+  local url=$1
+  local dst=$2
+
+  if ! download_file "$url" "$dst"; then
+    return 1
+  fi
+
+  [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
+}
+
+trap cleanup_uninstall_tmp EXIT
 
 # Проверка прав root
 if [[ $EUID -ne 0 ]]; then
@@ -45,8 +69,14 @@ systemctl disable xray > /dev/null 2>&1
 echo -e "${GREEN}✓ Сервис остановлен${NC}\n"
 
 echo -e "${BLUE}[2/6]${NC} ${YELLOW}Удаление Xray-core...${NC}"
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove > /dev/null 2>&1
+TMP_XRAY_INSTALLER=$(mktemp)
+if download_bash_script "https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh" "$TMP_XRAY_INSTALLER" && \
+   bash "$TMP_XRAY_INSTALLER" @ remove > /dev/null 2>&1; then
 echo -e "${GREEN}✓ Xray-core удален${NC}\n"
+
+else
+    echo -e "${YELLOW}⚠ Не удалось корректно удалить Xray-core через upstream installer${NC}\n"
+fi
 
 echo -e "${BLUE}[3/6]${NC} ${YELLOW}Удаление конфигураций и профилей...${NC}"
 rm -rf /usr/local/etc/xray

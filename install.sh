@@ -3,7 +3,7 @@
 # ═══════════════════════════════════════════════════════════
 # XRAYEBATOR INSTALLER v1.3.2 EXP
 # Автоматическая установка Xray Reality VPN
-# GitHub: https://github.com/howdeploy/Xrayebator
+# GitHub: https://github.com/d-rol/Xrayebator
 # ═══════════════════════════════════════════════════════════
 
 # Цвета
@@ -16,7 +16,7 @@ MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # GitHub репозиторий
-GITHUB_USER="howdeploy"
+GITHUB_USER="d-rol"
 GITHUB_REPO="Xrayebator"
 GITHUB_BRANCH="experimental"
 RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}"
@@ -28,6 +28,30 @@ DATA_DIR="/usr/local/etc/xray/data"
 SCRIPTS_DIR="/usr/local/etc/xray/scripts"
 PRIVATE_KEY_FILE="/usr/local/etc/xray/.private_key"
 PUBLIC_KEY_FILE="/usr/local/etc/xray/.public_key"
+TMP_XRAY_INSTALLER=""
+
+cleanup_install_tmp() {
+  [[ -n "$TMP_XRAY_INSTALLER" ]] && rm -f "$TMP_XRAY_INSTALLER"
+}
+
+download_file() {
+  local url=$1
+  local dst=$2
+  curl --proto '=https' --tlsv1.2 --fail --show-error --silent --location "$url" -o "$dst"
+}
+
+download_bash_script() {
+  local url=$1
+  local dst=$2
+
+  if ! download_file "$url" "$dst"; then
+    return 1
+  fi
+
+  [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
+}
+
+trap cleanup_install_tmp EXIT
 
 # Проверка прав root
 if [[ $EUID -ne 0 ]]; then
@@ -60,8 +84,9 @@ fi
 
 # [2/10] Установка Xray-core
 echo -e "${BLUE}[2/10]${NC} ${YELLOW}Установка Xray-core...${NC}"
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install > /dev/null 2>&1
-if [[ $? -eq 0 ]]; then
+TMP_XRAY_INSTALLER=$(mktemp)
+if download_bash_script "https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh" "$TMP_XRAY_INSTALLER" && \
+   bash "$TMP_XRAY_INSTALLER" @ install > /dev/null 2>&1; then
   echo -e "${GREEN}✓ Xray-core установлен${NC}\n"
 else
   echo -e "${RED}✗ Ошибка установки Xray-core${NC}"
@@ -70,9 +95,8 @@ fi
 
 # [3/10] Исправление systemd сервиса
 echo -e "${BLUE}[3/10]${NC} ${YELLOW}Настройка Xray сервиса...${NC}"
-sed -i 's/^User=nobody/User=root/' /etc/systemd/system/xray.service
 systemctl daemon-reload
-echo -e "${GREEN}✓ Сервис настроен${NC}\n"
+echo -e "${GREEN}✓ Сервис оставлен со штатными минимальными привилегиями${NC}\n"
 
 # [3.5/10] Загрузка расширенных geo-баз (Loyalsoldier)
 echo -e "${BLUE}[3.5/10]${NC} ${YELLOW}Загрузка расширенных geo-баз...${NC}"
