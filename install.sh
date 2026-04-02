@@ -18,7 +18,7 @@ NC='\033[0m'
 # GitHub репозиторий
 GITHUB_USER="d-rol"
 GITHUB_REPO="Xrayebator"
-SELF_RELEASE_TAG="v1.3.2-sec4"
+SELF_RELEASE_TAG="v1.3.2-sec5"
 SELF_RELEASE_BASE_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${SELF_RELEASE_TAG}"
 XTLS_INSTALL_REF="e741a4f56d368afbb9e5be3361b40c4552d3710d"
 XTLS_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
@@ -60,7 +60,7 @@ download_bash_script() {
 expected_sha256_from_file() {
   local checksum_file=$1
   local asset_name=$2
-  awk -v asset="$asset_name" '{ sub(/\r$/, "", $2); if ($2 == asset) { print $1; exit } }' "$checksum_file"
+  awk -v asset="$asset_name" '{ name=$2; sub(/\r$/, "", name); sub(/^\*/, "", name); if (name == asset) { print $1; exit } }' "$checksum_file"
 }
 
 verify_sha256() {
