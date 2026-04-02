@@ -8,6 +8,8 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 TMP_XRAY_INSTALLER=""
+XTLS_INSTALL_REF="e741a4f56d368afbb9e5be3361b40c4552d3710d"
+XTLS_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
 
 cleanup_uninstall_tmp() {
   [[ -n "$TMP_XRAY_INSTALLER" ]] && rm -f "$TMP_XRAY_INSTALLER"
@@ -28,6 +30,27 @@ download_bash_script() {
   fi
 
   [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
+}
+
+verify_sha256() {
+  local file_path=$1
+  local expected_sha=$2
+  local actual_sha
+
+  actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+  [[ -n "$expected_sha" ]] && [[ "$actual_sha" == "$expected_sha" ]]
+}
+
+download_verified_bash_script() {
+  local url=$1
+  local dst=$2
+  local expected_sha=$3
+
+  if ! download_bash_script "$url" "$dst"; then
+    return 1
+  fi
+
+  verify_sha256 "$dst" "$expected_sha"
 }
 
 trap cleanup_uninstall_tmp EXIT
@@ -70,7 +93,7 @@ echo -e "${GREEN}✓ Сервис остановлен${NC}\n"
 
 echo -e "${BLUE}[2/6]${NC} ${YELLOW}Удаление Xray-core...${NC}"
 TMP_XRAY_INSTALLER=$(mktemp)
-if download_bash_script "https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh" "$TMP_XRAY_INSTALLER" && \
+if download_verified_bash_script "https://raw.githubusercontent.com/XTLS/Xray-install/${XTLS_INSTALL_REF}/install-release.sh" "$TMP_XRAY_INSTALLER" "$XTLS_INSTALL_SHA256" && \
    bash "$TMP_XRAY_INSTALLER" @ remove > /dev/null 2>&1; then
 echo -e "${GREEN}✓ Xray-core удален${NC}\n"
 

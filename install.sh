@@ -18,8 +18,10 @@ NC='\033[0m'
 # GitHub репозиторий
 GITHUB_USER="d-rol"
 GITHUB_REPO="Xrayebator"
-GITHUB_BRANCH="experimental"
-RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}"
+SELF_RELEASE_TAG="v1.3.2-sec1"
+SELF_RELEASE_BASE_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${SELF_RELEASE_TAG}"
+XTLS_INSTALL_REF="e741a4f56d368afbb9e5be3361b40c4552d3710d"
+XTLS_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
 
 # Пути
 CONFIG_FILE="/usr/local/etc/xray/config.json"
@@ -29,9 +31,13 @@ SCRIPTS_DIR="/usr/local/etc/xray/scripts"
 PRIVATE_KEY_FILE="/usr/local/etc/xray/.private_key"
 PUBLIC_KEY_FILE="/usr/local/etc/xray/.public_key"
 TMP_XRAY_INSTALLER=""
+TMP_RELEASE_CHECKSUMS=""
+TMP_RELEASE_ASSET=""
 
 cleanup_install_tmp() {
   [[ -n "$TMP_XRAY_INSTALLER" ]] && rm -f "$TMP_XRAY_INSTALLER"
+  [[ -n "$TMP_RELEASE_CHECKSUMS" ]] && rm -f "$TMP_RELEASE_CHECKSUMS"
+  [[ -n "$TMP_RELEASE_ASSET" ]] && rm -f "$TMP_RELEASE_ASSET"
 }
 
 download_file() {
@@ -49,6 +55,65 @@ download_bash_script() {
   fi
 
   [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
+}
+
+expected_sha256_from_file() {
+  local checksum_file=$1
+  local asset_name=$2
+  awk -v asset="$asset_name" '$2 == asset { print $1; exit }' "$checksum_file"
+}
+
+verify_sha256() {
+  local file_path=$1
+  local expected_sha=$2
+  local actual_sha
+
+  actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+  [[ -n "$expected_sha" ]] && [[ "$actual_sha" == "$expected_sha" ]]
+}
+
+download_verified_bash_script() {
+  local url=$1
+  local dst=$2
+  local expected_sha=$3
+
+  if ! download_bash_script "$url" "$dst"; then
+    return 1
+  fi
+
+  verify_sha256 "$dst" "$expected_sha"
+}
+
+load_release_checksums() {
+  TMP_RELEASE_CHECKSUMS=$(mktemp)
+  download_file "${SELF_RELEASE_BASE_URL}/checksums.txt" "$TMP_RELEASE_CHECKSUMS"
+}
+
+download_release_asset_verified() {
+  local asset_name=$1
+  local destination=$2
+  local mode=$3
+  local expected_sha
+
+  expected_sha=$(expected_sha256_from_file "$TMP_RELEASE_CHECKSUMS" "$asset_name")
+  [[ -n "$expected_sha" ]] || return 1
+
+  TMP_RELEASE_ASSET=$(mktemp)
+  if ! download_file "${SELF_RELEASE_BASE_URL}/${asset_name}" "$TMP_RELEASE_ASSET"; then
+    rm -f "$TMP_RELEASE_ASSET"
+    TMP_RELEASE_ASSET=""
+    return 1
+  fi
+
+  if ! verify_sha256 "$TMP_RELEASE_ASSET" "$expected_sha"; then
+    rm -f "$TMP_RELEASE_ASSET"
+    TMP_RELEASE_ASSET=""
+    return 1
+  fi
+
+  install -m "$mode" "$TMP_RELEASE_ASSET" "$destination"
+  rm -f "$TMP_RELEASE_ASSET"
+  TMP_RELEASE_ASSET=""
 }
 
 trap cleanup_install_tmp EXIT
@@ -85,7 +150,7 @@ fi
 # [2/10] Установка Xray-core
 echo -e "${BLUE}[2/10]${NC} ${YELLOW}Установка Xray-core...${NC}"
 TMP_XRAY_INSTALLER=$(mktemp)
-if download_bash_script "https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh" "$TMP_XRAY_INSTALLER" && \
+if download_verified_bash_script "https://raw.githubusercontent.com/XTLS/Xray-install/${XTLS_INSTALL_REF}/install-release.sh" "$TMP_XRAY_INSTALLER" "$XTLS_INSTALL_SHA256" && \
    bash "$TMP_XRAY_INSTALLER" @ install > /dev/null 2>&1; then
   echo -e "${GREEN}✓ Xray-core установлен${NC}\n"
 else
@@ -140,6 +205,10 @@ echo -e "${BLUE}[4/10]${NC} ${YELLOW}Создание структуры дир�
 mkdir -p "$PROFILES_DIR"
 mkdir -p "$DATA_DIR"
 mkdir -p "$SCRIPTS_DIR"
+if ! load_release_checksums; then
+  echo -e "${RED}вњ— РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё checksums.txt РёР· release${NC}"
+  exit 1
+fi
 echo -e "${GREEN}✓ Директории созданы${NC}\n"
 
 # [5/10] Генерация ключей Reality
@@ -279,8 +348,7 @@ fi
 
 # [9/10] Загрузка данных
 echo -e "${BLUE}[9/10]${NC} ${YELLOW}Загрузка данных приложения...${NC}"
-curl -fsSL "${RAW_BASE_URL}/sni_list.txt" -o "${DATA_DIR}/sni_list.txt"
-if [[ $? -eq 0 ]] && [[ -s "${DATA_DIR}/sni_list.txt" ]]; then
+if download_release_asset_verified "sni_list.txt" "${DATA_DIR}/sni_list.txt" 0644; then
   echo -e "${GREEN}✓ Список SNI загружен${NC}"
 else
   echo -e "${YELLOW}⚠ Не удалось загрузить список SNI, создаю базовый...${NC}"
@@ -298,8 +366,7 @@ www.microsoft.com|foreign|3
 EOF
 fi
 
-curl -fsSL "${RAW_BASE_URL}/ascii_art.txt" -o "${DATA_DIR}/ascii_art.txt" 2>/dev/null
-if [[ -s "${DATA_DIR}/ascii_art.txt" ]]; then
+if download_release_asset_verified "ascii_art.txt" "${DATA_DIR}/ascii_art.txt" 0644 2>/dev/null; then
   echo -e "${GREEN}✓ ASCII арт загружен${NC}\n"
 else
   echo -e "${CYAN}✓ ASCII арт недоступен (не критично)${NC}\n"
@@ -307,9 +374,7 @@ fi
 
 # [10/10] Установка приложения
 echo -e "${BLUE}[10/10]${NC} ${YELLOW}Установка управляющего приложения...${NC}"
-curl -fsSL "${RAW_BASE_URL}/xrayebator" -o /usr/local/bin/xrayebator
-if [[ $? -eq 0 ]] && [[ -s /usr/local/bin/xrayebator ]]; then
-  chmod +x /usr/local/bin/xrayebator
+if download_release_asset_verified "xrayebator" "/usr/local/bin/xrayebator" 0755; then
   echo -e "${GREEN}✓ Приложение xrayebator установлено${NC}"
 else
   echo -e "${RED}✗ Ошибка загрузки xrayebator${NC}"
@@ -317,10 +382,8 @@ else
 fi
 
 # Скрипты управления
-curl -fsSL "${RAW_BASE_URL}/update.sh" -o "${SCRIPTS_DIR}/update.sh" 2>/dev/null
-chmod +x "${SCRIPTS_DIR}/update.sh" 2>/dev/null
-curl -fsSL "${RAW_BASE_URL}/uninstall.sh" -o "${SCRIPTS_DIR}/uninstall.sh" 2>/dev/null
-chmod +x "${SCRIPTS_DIR}/uninstall.sh" 2>/dev/null
+download_release_asset_verified "update.sh" "${SCRIPTS_DIR}/update.sh" 0755 > /dev/null 2>&1
+download_release_asset_verified "uninstall.sh" "${SCRIPTS_DIR}/uninstall.sh" 0755 > /dev/null 2>&1
 ln -sf "${SCRIPTS_DIR}/update.sh" /usr/local/bin/xrayebator-update 2>/dev/null
 ln -sf "${SCRIPTS_DIR}/uninstall.sh" /usr/local/bin/xrayebator-uninstall 2>/dev/null
 echo -e "${GREEN}✓ Скрипты установлены${NC}\n"

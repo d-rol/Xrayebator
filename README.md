@@ -54,14 +54,18 @@
 > **Установка:**
 >
 > ```
-> curl -fsSLo install.sh https://raw.githubusercontent.com/d-rol/Xrayebator/main/install.sh
+> curl -fsSLO https://github.com/d-rol/Xrayebator/releases/latest/download/install.sh
+> curl -fsSLO https://github.com/d-rol/Xrayebator/releases/latest/download/checksums.txt
+> sha256sum -c checksums.txt --ignore-missing
 > sudo bash install.sh
 > ```
 >
 > или
 >
 > ```
-> wget -O install.sh https://raw.githubusercontent.com/d-rol/Xrayebator/main/install.sh
+> wget https://github.com/d-rol/Xrayebator/releases/latest/download/install.sh
+> wget https://github.com/d-rol/Xrayebator/releases/latest/download/checksums.txt
+> sha256sum -c checksums.txt --ignore-missing
 > sudo bash install.sh
 > ```
 

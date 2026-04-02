@@ -18,11 +18,17 @@ NC='\033[0m'
 # GitHub репозиторий
 GITHUB_USER="d-rol"
 GITHUB_REPO="Xrayebator"
+SELF_RELEASES_API_URL="https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/releases/latest"
+XTLS_INSTALL_REF="e741a4f56d368afbb9e5be3361b40c4552d3710d"
+XTLS_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
 RUNTIME_DIR="/run/xrayebator"
 UPDATE_SESSION_FILE="${RUNTIME_DIR}/update_session"
 UPDATE_SESSION_WARNED_FILE="${UPDATE_SESSION_FILE}.warned"
 TMP_UPDATE_SCRIPT=""
 TMP_XRAYEBATOR_BIN=""
+TMP_RELEASE_CHECKSUMS=""
+SELF_RELEASE_TAG=""
+SELF_RELEASE_BASE_URL=""
 
 ensure_runtime_dir() {
   mkdir -p "$RUNTIME_DIR"
@@ -38,6 +44,7 @@ make_runtime_temp() {
 cleanup_update_tmp() {
   [[ -n "$TMP_UPDATE_SCRIPT" ]] && rm -f "$TMP_UPDATE_SCRIPT"
   [[ -n "$TMP_XRAYEBATOR_BIN" ]] && rm -f "$TMP_XRAYEBATOR_BIN"
+  [[ -n "$TMP_RELEASE_CHECKSUMS" ]] && rm -f "$TMP_RELEASE_CHECKSUMS"
 }
 
 download_file() {
@@ -55,6 +62,68 @@ download_bash_script() {
   fi
 
   [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
+}
+
+expected_sha256_from_file() {
+  local checksum_file=$1
+  local asset_name=$2
+  awk -v asset="$asset_name" '$2 == asset { print $1; exit }' "$checksum_file"
+}
+
+verify_sha256() {
+  local file_path=$1
+  local expected_sha=$2
+  local actual_sha
+
+  actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+  [[ -n "$expected_sha" ]] && [[ "$actual_sha" == "$expected_sha" ]]
+}
+
+download_verified_bash_script() {
+  local url=$1
+  local dst=$2
+  local expected_sha=$3
+
+  if ! download_bash_script "$url" "$dst"; then
+    return 1
+  fi
+
+  verify_sha256 "$dst" "$expected_sha"
+}
+
+fetch_latest_release_tag() {
+  curl --proto '=https' --tlsv1.2 --fail --show-error --silent --location "$SELF_RELEASES_API_URL" | \
+    jq -r '.tag_name // empty'
+}
+
+load_release_checksums() {
+  TMP_RELEASE_CHECKSUMS=$(make_runtime_temp "checksums")
+  download_file "${SELF_RELEASE_BASE_URL}/checksums.txt" "$TMP_RELEASE_CHECKSUMS"
+}
+
+download_release_asset_verified() {
+  local asset_name=$1
+  local destination=$2
+  local mode=$3
+  local expected_sha
+  local tmp_asset
+
+  expected_sha=$(expected_sha256_from_file "$TMP_RELEASE_CHECKSUMS" "$asset_name")
+  [[ -n "$expected_sha" ]] || return 1
+
+  tmp_asset=$(make_runtime_temp "${asset_name}")
+  if ! download_file "${SELF_RELEASE_BASE_URL}/${asset_name}" "$tmp_asset"; then
+    rm -f "$tmp_asset"
+    return 1
+  fi
+
+  if ! verify_sha256 "$tmp_asset" "$expected_sha"; then
+    rm -f "$tmp_asset"
+    return 1
+  fi
+
+  install -m "$mode" "$tmp_asset" "$destination"
+  rm -f "$tmp_asset"
 }
 
 trap cleanup_update_tmp EXIT
@@ -189,8 +258,6 @@ if [[ -z "$VERSION_NAME" ]]; then
   esac
 fi
 
-RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${GITHUB_BRANCH}"
-
 echo ""
 echo -e "${BLUE}Обновление до версии: ${VERSION_COLOR}${VERSION_NAME}${NC}"
 echo -e "${BLUE}Ветка GitHub: ${VERSION_COLOR}${GITHUB_BRANCH}${NC}\n"
@@ -227,6 +294,27 @@ fi
 
 # Резервная копия текущих настроек
 echo -e "${YELLOW}Создание резервной копии...${NC}"
+if [[ "$GITHUB_BRANCH" != "main" ]]; then
+  echo -e "${RED}вњ— Р—Р°С‰РёС‰С‘РЅРЅС‹Р№ updater РїРѕРєР° РїРѕРґРґРµСЂР¶РёРІР°РµС‚ С‚РѕР»СЊРєРѕ Stable release channel${NC}"
+  rm -f "$UPDATE_SESSION_FILE" "$UPDATE_SESSION_WARNED_FILE"
+  exit 1
+fi
+
+SELF_RELEASE_TAG=$(fetch_latest_release_tag)
+if [[ -z "$SELF_RELEASE_TAG" ]]; then
+  echo -e "${RED}вњ— РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ latest release${NC}"
+  exit 1
+fi
+
+SELF_RELEASE_BASE_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${SELF_RELEASE_TAG}"
+VERSION_NAME="Release"
+VERSION_COLOR="${GREEN}"
+
+if ! load_release_checksums; then
+  echo -e "${RED}вњ— РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ checksums.txt РёР· release${NC}"
+  exit 1
+fi
+
 BACKUP_DIR="/usr/local/etc/xray/backup_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 cp /usr/local/bin/xrayebator "$BACKUP_DIR/" 2>/dev/null
@@ -246,7 +334,7 @@ echo "$GITHUB_BRANCH" > /usr/local/etc/xray/.current_branch 2>/dev/null
 echo -e "${YELLOW}Проверка обновлений update.sh...${NC}"
 TMP_UPDATE_SCRIPT=$(make_runtime_temp "update_new")
 
-if download_bash_script "${RAW_BASE_URL}/update.sh" "$TMP_UPDATE_SCRIPT"; then
+if download_release_asset_verified "update.sh" "$TMP_UPDATE_SCRIPT" 0700; then
   chmod 700 "$TMP_UPDATE_SCRIPT"
 
   # Проверяем что скрипт валидный
@@ -288,7 +376,7 @@ echo ""
 echo -e "${YELLOW}Обновление xrayebator...${NC}"
 TMP_XRAYEBATOR_BIN=$(make_runtime_temp "xrayebator_new")
 
-if download_bash_script "${RAW_BASE_URL}/xrayebator" "$TMP_XRAYEBATOR_BIN"; then
+if download_release_asset_verified "xrayebator" "$TMP_XRAYEBATOR_BIN" 0755; then
   install -m 0755 "$TMP_XRAYEBATOR_BIN" /usr/local/bin/xrayebator
   rm -f "$TMP_XRAYEBATOR_BIN"
   TMP_XRAYEBATOR_BIN=""
@@ -303,16 +391,14 @@ fi
 # Обновление списка SNI
 echo -e "${YELLOW}Обновление списка SNI...${NC}"
 mkdir -p /usr/local/etc/xray/data
-curl -fsSL "${RAW_BASE_URL}/sni_list.txt" -o /usr/local/etc/xray/data/sni_list.txt
-
-if [[ $? -eq 0 ]]; then
+if download_release_asset_verified "sni_list.txt" "/usr/local/etc/xray/data/sni_list.txt" 0644; then
   echo -e "${GREEN}✓ Список SNI обновлён${NC}\n"
 else
   echo -e "${YELLOW}⚠ Не удалось обновить SNI список${NC}\n"
 fi
 
 # Обновление ASCII арта (опционально)
-curl -fsSL "${RAW_BASE_URL}/ascii_art.txt" -o /usr/local/etc/xray/data/ascii_art.txt 2>/dev/null
+download_release_asset_verified "ascii_art.txt" "/usr/local/etc/xray/data/ascii_art.txt" 0644 2>/dev/null
 
 # Проверка версии
 echo -e "${YELLOW}Проверка установленной версии...${NC}"

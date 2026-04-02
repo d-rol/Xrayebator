@@ -2,7 +2,7 @@
 
 # ═══════════════════════════════════════════════════════════
 # XRAYEBATOR v1.3.2 EXP - Xray Reality VPN Manager
-# GitHub: https://github.com/howdeploy/Xrayebator
+# GitHub: https://github.com/d-rol/Xrayebator
 # License: MIT
 # Экспериментальная версия с исправлениями маршрутизации
 # ═══════════════════════════════════════════════════════════
@@ -25,6 +25,8 @@ PUBLIC_KEY_FILE="/usr/local/etc/xray/.public_key"
 SNI_LIST="$DATA_DIR/sni_list.txt"
 ASCII_ART="$DATA_DIR/ascii_art.txt"
 RUNTIME_DIR="/run/xrayebator"
+ADGUARD_INSTALL_TAG="v0.107.73"
+ADGUARD_INSTALL_SHA256="ed31da8e84edff5f154cd82e763eb0de051171dbbdb12e8e7e337ccdc9dfeb1c"
 
 # Проверка прав root
 if [[ $EUID -ne 0 ]]; then
@@ -83,6 +85,27 @@ download_bash_script() {
   fi
 
   [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
+}
+
+verify_sha256() {
+  local file_path=$1
+  local expected_sha=$2
+  local actual_sha
+
+  actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+  [[ -n "$expected_sha" ]] && [[ "$actual_sha" == "$expected_sha" ]]
+}
+
+download_verified_bash_script() {
+  local url=$1
+  local dst=$2
+  local expected_sha=$3
+
+  if ! download_bash_script "$url" "$dst"; then
+    return 1
+  fi
+
+  verify_sha256 "$dst" "$expected_sha"
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -2017,7 +2040,7 @@ RESOLVEDEOF
   echo -e "${CYAN}Шаг 3/7: Скачивание AdGuard Home...${NC}"
   local agh_installer
   agh_installer=$(make_runtime_temp "agh_install")
-  if ! download_bash_script "https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh" "$agh_installer"; then
+  if ! download_verified_bash_script "https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/${ADGUARD_INSTALL_TAG}/scripts/install.sh" "$agh_installer" "$ADGUARD_INSTALL_SHA256"; then
     echo -e "${RED}✗ Ошибка скачивания установщика${NC}"
     echo -n -e "${YELLOW}Нажмите Enter для продолжения...${NC}"
     read
