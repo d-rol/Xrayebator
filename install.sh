@@ -151,7 +151,7 @@ fi
 echo -e "${BLUE}[2/10]${NC} ${YELLOW}Установка Xray-core...${NC}"
 TMP_XRAY_INSTALLER=$(mktemp)
 if download_verified_bash_script "https://raw.githubusercontent.com/XTLS/Xray-install/${XTLS_INSTALL_REF}/install-release.sh" "$TMP_XRAY_INSTALLER" "$XTLS_INSTALL_SHA256" && \
-   bash "$TMP_XRAY_INSTALLER" @ install > /dev/null 2>&1; then
+   bash "$TMP_XRAY_INSTALLER" install > /dev/null 2>&1; then
   echo -e "${GREEN}✓ Xray-core установлен${NC}\n"
 else
   echo -e "${RED}✗ Ошибка установки Xray-core${NC}"

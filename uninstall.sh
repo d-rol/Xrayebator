@@ -94,7 +94,7 @@ echo -e "${GREEN}✓ Сервис остановлен${NC}\n"
 echo -e "${BLUE}[2/6]${NC} ${YELLOW}Удаление Xray-core...${NC}"
 TMP_XRAY_INSTALLER=$(mktemp)
 if download_verified_bash_script "https://raw.githubusercontent.com/XTLS/Xray-install/${XTLS_INSTALL_REF}/install-release.sh" "$TMP_XRAY_INSTALLER" "$XTLS_INSTALL_SHA256" && \
-   bash "$TMP_XRAY_INSTALLER" @ remove > /dev/null 2>&1; then
+   bash "$TMP_XRAY_INSTALLER" remove > /dev/null 2>&1; then
 echo -e "${GREEN}✓ Xray-core удален${NC}\n"
 
 else
@@ -141,4 +141,3 @@ echo -e "${NC}\n"
 
 echo -e "${CYAN}Xrayebator полностью удален с вашего сервера.${NC}"
 echo -e "${BLUE}Спасибо за использование!${NC}\n"
-
