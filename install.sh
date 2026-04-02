@@ -60,7 +60,7 @@ download_bash_script() {
 expected_sha256_from_file() {
   local checksum_file=$1
   local asset_name=$2
-  awk -v asset="$asset_name" '$2 == asset { print $1; exit }' "$checksum_file"
+  awk -v asset="$asset_name" '{ sub(/\r$/, "", $2); if ($2 == asset) { print $1; exit } }' "$checksum_file"
 }
 
 verify_sha256() {
