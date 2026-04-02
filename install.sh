@@ -18,7 +18,7 @@ NC='\033[0m'
 # GitHub репозиторий
 GITHUB_USER="d-rol"
 GITHUB_REPO="Xrayebator"
-SELF_RELEASE_TAG="v1.3.2-sec3"
+SELF_RELEASE_TAG="v1.3.2-sec4"
 SELF_RELEASE_BASE_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${SELF_RELEASE_TAG}"
 XTLS_INSTALL_REF="e741a4f56d368afbb9e5be3361b40c4552d3710d"
 XTLS_INSTALL_SHA256="7f70c95f6b418da8b4f4883343d602964915e28748993870fd554383afdbe555"
@@ -214,8 +214,8 @@ echo -e "${GREEN}✓ Директории созданы${NC}\n"
 # [5/10] Генерация ключей Reality
 echo -e "${BLUE}[5/10]${NC} ${YELLOW}Генерация ключей Reality...${NC}"
 KEYS_OUTPUT=$(/usr/local/bin/xray x25519 2>&1)
-PRIVATE_KEY=$(echo "$KEYS_OUTPUT" | grep "PrivateKey:" | cut -d' ' -f2)
-PUBLIC_KEY=$(echo "$KEYS_OUTPUT" | grep "Password:" | cut -d' ' -f2)
+PRIVATE_KEY=$(printf "%s\n" "$KEYS_OUTPUT" | sed -n 's/^PrivateKey:[[:space:]]*//p' | head -n 1)
+PUBLIC_KEY=$(printf "%s\n" "$KEYS_OUTPUT" | sed -n -E 's/^(Password \(PublicKey\)|PublicKey|Password):[[:space:]]*//p' | head -n 1)
 
 if [[ -z "$PRIVATE_KEY" ]] || [[ -z "$PUBLIC_KEY" ]]; then
   echo -e "${RED}✗ Ошибка генерации ключей${NC}"
