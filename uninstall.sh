@@ -29,7 +29,7 @@ download_bash_script() {
     return 1
   fi
 
-  [[ -s "$dst" ]] && head -n 1 "$dst" | grep -q "^#!/bin/bash"
+  [[ -s "$dst" ]] && head -n 1 "$dst" | grep -Eq '^#![[:space:]]*([^[:space:]]*/)?(env[[:space:]]+)?(ba|z)?sh([[:space:]].*)?$'
 }
 
 verify_sha256() {
